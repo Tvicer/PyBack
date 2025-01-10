@@ -1,34 +1,33 @@
+import datetime
 import hashlib
 import sqlite3
-import jwt # Импортируем библиотеку для работы с JWT
-import datetime
-from fastapi import FastAPI, HTTPException, Depends, status
-from pydantic import BaseModel, EmailStr
-from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 
-# Инициализация приложения FastAPI
-app = FastAPI()
+import jwt
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel, EmailStr
 
-# Секретный ключ для JWT (в реальных приложениях лучше хранить его в переменных окружения)
 SECRET_KEY = "mysecretkey"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Время жизни токена
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Константы для обработки ошибок
 credentials_exception = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Could not validate credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
-# Модель пользователя для валидации запросов
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+app = FastAPI()
+
+
 class User(BaseModel):
     name: str
     email: EmailStr
     password: str
 
-    # Хеширование пароля перед сохранением в базе данных
     def hash_password(self):
         return hashlib.sha256(self.password.encode()).hexdigest()
 
@@ -37,7 +36,6 @@ class LoginUser(BaseModel):
     email: EmailStr
     password: str
 
-    # Хеширование пароля перед сохранением в базе данных
     def hash_password(self):
         return hashlib.sha256(self.password.encode()).hexdigest()
 
@@ -45,10 +43,7 @@ class LoginUser(BaseModel):
 class EchoData(BaseModel):
     message: str
 
-# OAuth2 схема для аутентификации через токен
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# Функция для создания базы данных
 def init_db():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
@@ -64,11 +59,9 @@ def init_db():
     conn.close()
 
 
-# Инициализация базы данных при запуске
 init_db()
 
 
-# Функция для добавления пользователя в базу данных
 def add_user_to_db(user: User):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
@@ -80,7 +73,6 @@ def add_user_to_db(user: User):
     conn.close()
 
 
-# Функция для поиска пользователя по email
 def get_user_by_email(email: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
@@ -90,7 +82,6 @@ def get_user_by_email(email: str):
     return user
 
 
-# Функция для создания JWT токена
 def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
@@ -102,7 +93,6 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 
-# Функция для проверки токена
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -117,33 +107,27 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=credentials_exception)
 
 
-# Эндпоинт для регистрации пользователя
 @app.post("/register")
 async def register(user: User):
-    # Проверяем, есть ли уже пользователь с таким email
     existing_user = get_user_by_email(user.email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Добавляем пользователя в базу данных
     add_user_to_db(user)
     return {"message": "User registered successfully"}
 
 
-# Эндпоинт для логина
 @app.post("/login")
 async def login(user: LoginUser):
-    # Получаем пользователя по email
+    # existing_user: 1 - name, 2 - email, 3 - password
     existing_user = get_user_by_email(user.email)
     if not existing_user:
         raise HTTPException(status_code=400, detail="User not found")
 
-    # Проверка пароля
-    stored_password = existing_user[3]  # Пароль из базы
+    stored_password = existing_user[3]
     if stored_password != user.hash_password():
         raise HTTPException(status_code=400, detail="Incorrect password")
 
-    # Создание токена
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": existing_user[2]}, expires_delta=access_token_expires
@@ -154,7 +138,6 @@ async def login(user: LoginUser):
             "token_type": "bearer"}
 
 
-# Эндпоинт для эхо (защищённый)
 @app.post("/echo")
 async def echo(data: EchoData, current_user: dict = Depends(get_current_user)):
     return {"echo": data.message}
